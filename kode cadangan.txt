@@ -1,0 +1,70 @@
+// Membersihkan job yang sudah selesai atau tidak lagi diperlukan
+(async () => {
+  console.log("Membersihkan job lama di queue...");
+
+  await kategoriQueue.clean(0, 'delayed');
+  await kategoriQueue.clean(0, 'wait');
+  await kategoriQueue.clean(0, 'failed');
+  await kategoriQueue.clean(0, 'completed');
+
+  console.log("Queue dibersihkan!");
+})();
+
+
+// PATCH /update/:id (update jam_keluar, biaya dihitung otomatis)
+router.patch('/update/:id', verifyToken, async (req, res) => {
+    try {
+        let id = req.params.id;
+        let { jam_keluar } = req.body;
+
+        // Ambil data kendaraan berdasarkan ID via queue
+        const jobGet = await kendaraanQueue.add({ action: 'get' });
+        const resultGet = await jobGet.finished();
+        const kendaraan = resultGet.Data.find(k => k.id == id);
+
+        if (!kendaraan) {
+            return res.status(404).json({
+                status: false,
+                message: 'Data kendaraan tidak ditemukan'
+            });
+        }
+
+        const jamMasuk = new Date(kendaraan.jam_masuk);
+        const jamKeluar = new Date(jam_keluar);
+
+        if (jamKeluar <= jamMasuk) {
+            return res.status(400).json({
+                status: false,
+                message: 'Jam keluar harus lebih besar dari jam masuk'
+            });
+        }
+
+        const selisihMs = jamKeluar - jamMasuk;
+        const selisihJam = Math.ceil(selisihMs / (1000 * 60 * 60));
+
+        let biaya = 2000;
+        if (selisihJam > 1) {
+            biaya += (selisihJam - 1) * 1000;
+        }
+
+        const Data = {
+            jam_keluar: jam_keluar,
+            biaya: biaya
+        };
+
+        await kendaraanQueue.add({ action: 'update', id, Data });
+
+        return res.status(200).json({
+            status: true,
+            message: 'Data kendaraan berhasil diperbarui',
+            durasi: selisihJam + ' jam',
+            biaya: biaya
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: false,
+            message: 'Terjadi kesalahan saat update kendaraan',
+            error: error.message
+        });
+    }
+});
